@@ -6,7 +6,7 @@ from kafka import KafkaConsumer
 
 # ---------------- CONFIG ----------------
 
-TOPIC = os.getenv("TOPIC", "claims-reported")
+TOPIC = os.getenv("TOPIC", "claims-valid")
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
 
 POSTGRES_HOST = os.getenv("POSTGRES_HOST")

@@ -8,12 +8,16 @@ services:
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
-      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+
+      # 🔥 FIX IMPORTANTE (Docker-safe)
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
@@ -28,6 +32,9 @@ services:
       timeout: 5s
       retries: 12
 
+    networks:
+      - kafka-net
+
 
   kafka-init:
     image: apache/kafka:3.7.0
@@ -39,10 +46,13 @@ services:
     command: >
       "
       /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic claims-reported --partitions 3 --replication-factor 1 &&
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic claims-valid --partitions 3 --replication-factor 1 &&
       /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic payment-decisions --partitions 3 --replication-factor 1 &&
       /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic fraud-events --partitions 3 --replication-factor 1 &&
       /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic claims-dlq --partitions 3 --replication-factor 1
       "
+    networks:
+      - kafka-net
 
 
   redis:
@@ -50,13 +60,14 @@ services:
     container_name: redis-fraud
     ports:
       - "6379:6379"
-
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 5s
+    networks:
+      - kafka-net
 
 
   producer:
@@ -72,7 +83,27 @@ services:
       CLAIMS_TOPIC: claims-reported
       PRODUCER_INTERVAL_SECONDS: 2
       FRAUD_RATE: 0.15
-    #restart: unless-stopped
+    networks:
+      - kafka-net
+
+
+  validator-service:
+    build:
+      context: ./validator-service
+      dockerfile: Dockerfile
+    container_name: validator-service
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      INPUT_TOPIC: claims-reported
+      VALID_TOPIC: claims-valid
+      DLQ_TOPIC: claims-dlq
+      KAFKA_CONSUMER_GROUP: validator-group
+    restart: unless-stopped
+    networks:
+      - kafka-net
 
 
   blocker-service:
@@ -87,7 +118,7 @@ services:
         condition: service_healthy
     environment:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
-      INPUT_TOPIC: claims-reported
+      INPUT_TOPIC: claims-valid
       OUTPUT_TOPIC: payment-decisions
       FRAUD_TOPIC: fraud-events
       KAFKA_CONSUMER_GROUP: blocker-group
@@ -95,6 +126,8 @@ services:
       REDIS_PORT: 6379
       HIGH_RISK_AMOUNT: 10000
     restart: unless-stopped
+    networks:
+      - kafka-net
 
 
   db-writer-service:
@@ -109,7 +142,7 @@ services:
         condition: service_healthy
     environment:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
-      TOPIC: claims-reported
+      TOPIC: payment-decisions
 
       POSTGRES_HOST: postgres
       POSTGRES_DB: claims_db
@@ -117,6 +150,8 @@ services:
       POSTGRES_PASSWORD: claims_pass
       POSTGRES_PORT: 5432
     restart: unless-stopped
+    networks:
+      - kafka-net
 
 
   postgres:
@@ -136,7 +171,12 @@ services:
       timeout: 5s
       retries: 20
     restart: unless-stopped
+    networks:
+      - kafka-net
 
 
 volumes:
   postgres_data:
+
+networks:
+  kafka-net:

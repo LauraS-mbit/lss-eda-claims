@@ -9,27 +9,33 @@ from datetime import datetime, timedelta, timezone
 from kafka import KafkaProducer
 
 
-# -----------------------------------------------------------------------------
+# ------------------------------------------------------------------
 # CONFIG
-# -----------------------------------------------------------------------------
+# ------------------------------------------------------------------
 
-BROKER = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
-TOPIC_MAIN = os.getenv("CLAIMS_TOPIC", "claims-reported")
-TOPIC_DLQ = os.getenv("CLAIMS_DLQ_TOPIC", "claims-dlq")
+BROKER = os.getenv(
+    "KAFKA_BOOTSTRAP_SERVERS",
+    "kafka:9092"
+)
+
+TOPIC_MAIN = os.getenv(
+    "CLAIMS_TOPIC",
+    "claims-reported"
+)
 
 MAX_EVENTS = 50
 SLEEP_SECONDS = 2
 
 INVALID_RATE = 0.20
-FRAUD_RATE = 0.1
+FRAUD_RATE = 0.10
 
 START_DATE = datetime(2023, 1, 1)
 END_DATE = datetime.now()
 
 
-# -----------------------------------------------------------------------------
-# KAFKA PRODUCER (Kafka-native setup)
-# -----------------------------------------------------------------------------
+# ------------------------------------------------------------------
+# KAFKA PRODUCER
+# ------------------------------------------------------------------
 
 producer = KafkaProducer(
     bootstrap_servers=BROKER,
@@ -40,15 +46,16 @@ producer = KafkaProducer(
 )
 
 
-# -----------------------------------------------------------------------------
+# ------------------------------------------------------------------
 # HELPERS
-# -----------------------------------------------------------------------------
+# ------------------------------------------------------------------
 
 def utc_now_iso():
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def generate_amount():
+
     invalid = random.random() < INVALID_RATE
 
     if invalid:
@@ -58,6 +65,7 @@ def generate_amount():
 
 
 def generate_dates():
+
     contract_date = START_DATE + timedelta(
         seconds=random.randint(
             0,
@@ -78,7 +86,9 @@ def generate_dates():
 
 
 def build_event():
+
     amount, invalid = generate_amount()
+
     contract_date, claim_date, fraud = generate_dates()
 
     customer_id = f"CUST-{random.randint(1, 50)}"
@@ -98,28 +108,16 @@ def build_event():
     return event, customer_id, invalid, fraud
 
 
-def route_event(invalid, fraud):
-    """
-    Routing estilo streaming real:
-    - invalid → DLQ
-    - fraud → main (o futuro fraud topic)
-    - valid → main
-    """
-    if invalid:
-        return TOPIC_DLQ
-
-    return TOPIC_MAIN
-
-
-# -----------------------------------------------------------------------------
-# MAIN LOOP (streaming style)
-# -----------------------------------------------------------------------------
+# ------------------------------------------------------------------
+# MAIN
+# ------------------------------------------------------------------
 
 def main():
 
     print(
-        f"producer started broker={BROKER} "
-        f"main_topic={TOPIC_MAIN} dlq_topic={TOPIC_DLQ}",
+        f"producer started "
+        f"broker={BROKER} "
+        f"topic={TOPIC_MAIN}",
         flush=True
     )
 
@@ -128,34 +126,31 @@ def main():
     fraud_count = 0
 
     try:
+
         while sent < MAX_EVENTS:
 
             event, customer_id, invalid, fraud = build_event()
 
-            topic = route_event(invalid, fraud)
-
-            # Kafka-native: KEY = customerId (particionado real)
             future = producer.send(
-                topic=topic,
+                topic=TOPIC_MAIN,
                 key=customer_id,
                 value=event
             )
 
-            # metadata Kafka (debug real streaming)
             result = future.get(timeout=10)
 
-            # metrics
             sent += 1
             invalid_count += int(invalid)
             fraud_count += int(fraud)
 
             print(
-                f"sent eventId={event['eventId']} "
+                f"sent "
+                f"eventId={event['eventId']} "
                 f"customer={customer_id} "
-                f"topic={topic} "
                 f"partition={result.partition} "
                 f"offset={result.offset} "
-                f"invalid={invalid} fraud={fraud}",
+                f"invalid={invalid} "
+                f"fraud_pattern={fraud}",
                 flush=True
             )
 
@@ -165,11 +160,15 @@ def main():
         print(f"producer error: {e}", flush=True)
 
     finally:
+
         producer.flush()
         producer.close()
 
         print(
-            f"finished sent={sent} invalid={invalid_count} fraud={fraud_count}",
+            f"finished "
+            f"sent={sent} "
+            f"invalid_generated={invalid_count} "
+            f"fraud_patterns={fraud_count}",
             flush=True
         )
 
