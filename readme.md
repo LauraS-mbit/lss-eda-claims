@@ -475,17 +475,22 @@ La arquitectura utilizada es event-driven con separación explícita entre capa 
 
 ## 12. Observaciones / Limitaciones conocidas / Mejoras
 
+### Particionado Kafka
+
+Los eventos se publican utilizando customerId como clave de particionado, lo que garantiza que todas las reclamaciones de un mismo cliente se procesen en orden dentro de la misma partición. 
+
+Aunque en la implementación actual cada claim se evalúa de forma independiente y claimId podría proporcionar una distribución de carga más uniforme, se ha optado por customerId para facilitar futuras reglas de fraude basadas en el historial o comportamiento del cliente. 
+
 ### Validation Service
 
-El sistema implementa una arquitectura basada en eventos donde el Validation Service actúa como una etapa independiente del pipeline, consumiendo eventos desde claims-reported y publicando únicamente eventos válidos en claims-valid. Esto introduce una separación clara de responsabilidades basada en contratos de eventos entre etapas.
+El Validation Service actúa como una etapa independiente, consumiendo eventos desde claims-reported y publicando únicamente eventos válidos en claims-valid, con el fin de mantener una separación clara entre servicios.
 
-La escalabilidad del Validation Service se consigue mediante el uso de consumer groups de Kafka. Al particionar el topic claims-reported, Kafka distribuye automáticamente las particiones entre múltiples instancias del validador, permitiendo procesamiento paralelo:
+La escalabilidad del Validation Service se consigue mediante el uso de consumer groups de Kafka: al particionar el topic claims-reported, Kafka distribuye las particiones entre múltiples instancias del validador, permitiendo procesamiento paralelo, eliminando cuellos de botella mediante el escalado horizontal del servicio.
 
   - kafka-topics.sh --create --topic claims-reported --partitions 3
   - kafka-topics.sh --create --topic claims-valid --partitions 3
   - kafka-topics.sh --create --topic payment-decisions --partitions 3
 
-De esta forma, cada instancia procesa una porción del stream de manera independiente, manteniendo el orden dentro de cada partición y eliminando cuellos de botella mediante escalado horizontal del servicio.
 
 ### DLQ sin reprocess pipeline
 
@@ -499,15 +504,23 @@ Como mitigación actual para la configuración estándar de at-least-once delive
 
 - Como mejora, reforzar la idempotencia en la capa de persistencia mediante constraints únicos en base de datos (por ejemplo, claimId) o lógica de deduplicación en el Writer, garantizando así consistencia incluso ante reentregas de Kafka.
 
+
 ### Writing Service
 
-El Writing Service actualmente persiste datos aún no enriquecidos con la decisión de negocio del sistema (Fraud Signal Engine). Una evolución natural del sistema sería modificar el consumidor para que lea desde payment-decisions, de forma que la persistencia refleje el estado final del proceso, incluyendo la decision y las reasons asociadas. 
+El Writing Service persiste datos aún no enriquecidos con la decisión de negocio del sistema (Fraud Signal Engine). Una evolución natural del sistema sería modificar el consumidor para que lea desde payment-decisions, de forma que la persistencia refleje el estado final del proceso, incluyendo la decision y las reasons asociadas. 
 
-Esta transición implica la necesidad de formalizar el contrato de eventos, introduciendo versionado de esquema (por ejemplo schemaVersion) o mecanismos de validación como JSON Schema o Avro con Schema Registry. El objetivo es garantizar compatibilidad hacia atrás, facilitar la evolución del modelo de eventos y reducir el riesgo de roturas entre productores y consumidores ante cambios en la lógica de negocio.
+Esta transición implicaría la necesidad de formalizar el contrato de eventos, introduciendo versionado de esquema (por ejemplo schemaVersion) o mecanismos de validación, para garantizar la compatibilidad hacia atrás y facilitar la evolución del modelo reduciendo riesgos de roturas entre productoes y consumidores ante cambios en la lógica de negocio. 
+
+### Versiones de eventos
+
+No existe explícitamente versionado de eventos en runtime (schemaVersion), compatibilidad entre versiones o estrategia de evolución de contratos:
+
+- Punto de mejora: Introducir un sistema formal de versionado de eventos que permita la evolución del sistema de forma segura y gobernada.
+
 
 ### Estado y agregados 
 
-Actualmente, el sistema incorpora gestión de estado básico reduciendo duplicados y manteniendo consistencia operativa (gracias al Resis y al estado implícito a nivel de offset que introduce kafka), aunque esto no constituye un sistema de gestión de estado completo a nivel de entidad o dominio. Por otro lado, el sistema aún no implementa agregaciones de estado avanzadas.
+Actualmente, el sistema incorpora gestión de estado básico reduciendo duplicados y manteniendo consistencia operativa (gracias al Redis y al estado implícito a nivel de offset que introduce kafka), aunque esto no constituye un sistema de gestión de estado completo a nivel de entidad o dominio. Por otro lado, el sistema aún no implementa agregaciones de estado avanzadas.
 
 - Punto de mejora:
   - Unificar la gestión de estado bajo un modelo más coherente y explícito, para conseguir una fuente única de verdad.
@@ -516,12 +529,6 @@ Actualmente, el sistema incorpora gestión de estado básico reduciendo duplicad
     - número de eventos de fraude por día
     - sumas de importes por periodos temporales
     - métricas basadas en ventanas deslizantes (rolling windows)
-
-### Versiones de eventos
-
-No existe explícitamente versionado de eventos en runtime (schemaVersion), compatibilidad entre versiones o estrategia de evolución de contratos:
-
-- Punto de mejora: Introducir un sistema formal de versionado de eventos que permita la evolución del sistema de forma segura y gobernada.
 
 
 ## 13. Conclusión
