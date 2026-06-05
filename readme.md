@@ -2,18 +2,18 @@
 
 ## 1. Caso de uso
 
-Este proyecto implementa una arquitectura orientada a eventos para el procesamiento de siniestros (claims) de una compañía aseguradora.
+El objetivo de esta práctica de consolidación es construir una arquitectura basada en eventos, con una aplicación realista, que procese información de forma asíncrona y/o en streaming, mantenga estado derivado y permita extensión y escalado.
 
-El sistema simula un flujo continuo de claims de seguros, que son evaluados automáticamente para detectar posibles fraudes y mantener información persistida para auditoría y análisis posterior.
+Este proyecto implementa una arquitectura orientada a eventos para el procesamiento de siniestros (claims) de una compañía aseguradora en tiempo casi real: el sistema simula un flujo continuo de siniestros que se evaluan automáticamente para detectar posibles fraudes y mantener información persistida para auditoría y análisis posterior.
 
-El objetivo es demostrar cómo construir un sistema desacoplado capaz de:
+En concreto, el sistema desarrollado:
 
-- Procesar eventos de forma asíncrona.
-- Gestionar errores y eventos inválidos mediante Dead Letter Queue (DLQ).
-- Detectar posibles fraudes en tiempo casi real y generar indicadores para bloquear los pagos del siniestro.
-- Mantener estado derivado.
-- Escalar horizontalmente mediante consumidores independientes.
-- Garantizar persistencia y trazabilidad de los datos
+- Procesa eventos de forma asíncrona mediante una arquitectura orientada a eventos.
+- Gestiona errores mediante una Dead Letter Queue (DLQ).
+- Detecta posibles fraudes y genera decisiones de bloqueo o aprobación en tiempo casi real.
+- Mantiene estado derivado y persistencia a partir de los eventos procesados.
+- Permite escalar horizontalmente mediante consumidores independientes.
+- Garantiza la persistencia y trazabilidad de los datos.
 
 Cada siniestro reportado genera un evento que es publicado en Kafka y consumido por distintos servicios especializados. La solución utiliza Apache Kafka como backbone de eventos, Redis para mantener estado derivado e idempotencia, y PostgreSQL para persistencia de eventos. 
 
@@ -46,16 +46,16 @@ F -. idempotency .-> K[(Redis)]
 
 ### 2.2. Descripción general
 
-- El Producer genera eventos de reclamaciones (ClaimCreated) de forma continua y los envía a Kafka.
+- El **Producer** genera eventos de reclamaciones (ClaimCreated) de forma continua y los envía a Kafka.
 - Kafka recibe los eventos a un topic (claims-reported) y actúa como event bus central del sistema.
-- El Validator Service valida los eventos y los redirige según el resultado a los topics (claims-valid / DLQ (claims-dlq)
-- El Blocker Service consume los eventos válidos:
+- El **Validator Service** valida los eventos y los redirige según el resultado a los topics (claims-valid / DLQ (claims-dlq)
+- El **Blocker Service** consume los eventos válidos:
    - Redis se utiliza para garantizar idempotencia y evitar el reprocesamiento de eventos duplicados.
    - El sistema genera una decisión final según reglas simuladas de posible fraude (APPROVED o BLOCKED).
    - Los resultados se publican en:
      - payment-decisions (todos los eventos procesados)
      - fraud-events (sólo eventos bloqueados)
-- El Writing Service consume todos los eventos del topic (claims-reported) y los persiste en PostgreSQL:
+- El **Writing Service** consume todos los eventos del topic (claims-reported) y los persiste en PostgreSQL:
    - Se construye un histórico completo de siniestros para auditoría o análisis posterior.
 
 ### 2.3. Linaje de datos
@@ -73,17 +73,23 @@ F -. idempotency .-> K[(Redis)]
 
 ## 3. Componentes del sistema
 
-### 3.1 Producer
+### 3.1 Kafka Init
 
-- Responsablidad: crear eventos simulados de siniestros de una compañía de seguros.
+- Asegura la creación de los tópicos necesarios del sistema (claims-reported, claims-valid, payment-decisions, fraud-events y claims-dlq) con la configuración definida (particiones y factor de replicación)
+- Garantiza que toda la infraestructura de mensajería esté lista antes de que los productores y consumidores comiencen a operar.
+- Centraliza la preparación del entorno Kafka y evita dependencias implícitas o fallos por ausencia de tópicos en tiempo de ejecución.
+
+### 3.2 Producer
+
+- **Responsablidad:** crear eventos simulados de siniestros de una compañía de seguros.
   - crea eventos CLaimCreated:
       - se ha establecido un maximo de 50 eventos para el ejercicio
       - se ha establecido una espera de 2 segundos entre eventos
   - simula eventos fraudulentos (por importes o por fechas)
   - simula eventos no consistentes (vacíos)
   
-- Descripción:
-  Simula una fuente contínua de eventos cada pocos segundos, en este caso siniestros de una compañía de seguros, con su identificador, timestamp y atributos de negocio.     También simula eventos para poder detectar posibles situaciones de fraude e inconsistencias.
+- **Proceso:**
+  Simula una fuente contínua de eventos cada pocos segundos, en este caso siniestros de una compañía de seguros, con su identificador, timestamp y atributos de negocio.     También simula eventos para poder detectar posibles situaciones de fraude e inconsistencias:
 
 
 | Campo          | Ejemplo                                  | Descripción                                                        |
@@ -98,7 +104,6 @@ F -. idempotency .-> K[(Redis)]
 | `claimDate`    | `"2024-01-12T00:00:00"`                  | Fecha en la que se registró el siniestro (ISO 8601). |
 | `timestamp`    | `"2025-06-01T10:00:00Z"`                 | Fecha y hora de generación del evento en UTC (ISO 8601).           |
 
-- Flujo:
 
 ```mermaid
 flowchart LR
@@ -134,47 +139,46 @@ D --> E --> F --> G --> H --> I --> J --> K --> D
 D -->|done| L
 ```
   
-- Outuput:
+- **Outuput:**
   - Kafka topic: claims-reported
-  - Kafka topic (errores): claims-dlq
-   
-- Resultados:
+     
+- **Resultados:**
   - Flujo continuo de datos
   - Simulación realista de carga del sistema
   - Generación de eventos heterogéneos
 
-### 3.2 Capa de transporte Kafka
+### 3.3 Capa de transporte Kafka
 
-- Responsabilidad:
+- **Responsabilidad:**
   Kafka actúa como un event bus distribuido encargado del desacoplamiento entre productores y consumidores dentro del sistema.
 
-- Proceso:
-  - Recibe los eventos generados por el Producer, los almacena de forma persistente y los distribuye a través del patrón Publish/Subscribe.
-  - Garantiza el orden de los eventos por partición utilizando customerId como clave (se podría haber utilizado el claimId).
-  - Permite que múltiples consumidores independientes procesen los mensajes en paralelo sin depender entre sí.
+- **Proceso:**
+    - Recibe los eventos generados por el Producer, los almacena de forma persistente y los distribuye mediante el patrón Publish/Subscribe.
+    - Garantiza el orden de procesamiento de los eventos pertenecientes a un mismo cliente mediante el particionado basado en customerId.
+    - Permite el procesamiento paralelo y desacoplado de los mensajes a través de consumidores independientes organizados en grupos de consumo.
 
-- Resultados:
+- **Resultados:**
    - Se obtiene una arquitectura escalable horizontalmente
    - Con alta tolerancia a fallos gracias a la persistencia de eventos
    - Flexible para la incorporación de nuevos consumidores sin necesidad de modificar los componentes existentes.
-   - Patrón pub/sub desacoplado con reprocesamiento de eventos (replay).
+   - Capacidad inherente de reprocesamiento de eventos (replay) gracias a la persistencia del log de eventos y la gestión de offsets del consumidor.
 
-### 3.3. Validation Service 
+### 3.4. Validation Service 
 
-- Responsabilidad:
+- **Responsabilidad:**
   Garantizar la calidad y consistencia de los datos antes de que entren en el flujo de negocio.
 
-- Proceso:
+- **Proceso:**
   - Valida la estructura del evento (objeto json, y existencia de campos necesarios)
   - Comprueba reglas básicas de coherencia, como la relación entre fechas o la validez del importe.
   - Publica los eventos en topics según el resultado de la validación: 
       - si son válidos los publica en Kafka (claims-valid)
       - si no son válidos los envía al DLQ (claims-dlq), junto con el motivo del error.
 
-- Resultado:
+- **Resultado:**
   Evita que datos corruptos o inconsistentes avancen en el pipeline y asegurando la fiabilidad del resto de consumidores.
 
-- Validaciones realizadas:
+- **Validaciones realizadas:**
   Se han incorporado las siguientes validaciones en el servicio, como ejercicio para el proyecto.
   En la realidad, habría que considerar incorporar las necesarias para la integridad del evento y el proceso posterior.
 
@@ -196,7 +200,9 @@ D -->|done| L
   | 20 | Importe positivo                                         | `amount > 0`                          | Que el importe sea mayor que cero                               | `"amount": -500`             | `amount must be greater than zero`              |
   | 21 | Fecha de reclamación posterior o igual a la del contrato | `claim >= contract`                   | Que no se reclame antes de contratar                            | `claimDate < contractDate`   | `claimDate cannot be earlier than contractDate` |
 
-- jemplo de evento válido
+- **Ejemplo de evento válido**
+  
+```json
 {
   "eventId": "evt-001",
   "claimId": "claim-123",
@@ -207,28 +213,45 @@ D -->|done| L
   "timestamp": "2025-06-15T10:30:00Z",
   "eventRes": "ClaimCreated"
 }
+```
 
-### 3.4. DLQ (Dead Letter Queue)
+### 3.5. DLQ (Dead Letter Queue)
 
-- Responsabilidad:
+- **Responsabilidad:**
   Aislamiento y gestión de eventos inválidos dentro del pipeline de datos.
   Recibe eventos erróneos, incompletos o que no pueden ser procesados correctamente por los consumidores del sistema y se redirigen al DLQ
    
-- Output:
+- **Output:**
   Kafka topic: claims-dlq
-
-- Resultados:
-  - Sistema altamente resiliente frente a datos inválidos
+```json
+{
+  "error": "missing field amount",
+  "failedAt": "2026-06-05T10:00:00Z",
+  "originalEvent": {
+    "eventId": "123e4567-e89b-12d3-a456-426614174000",
+    "eventRes": "ClaimCreated",
+    "claimId": "CLM-4821",
+    "customerId": "CUST-12",
+    "amount": null,
+    "contractId": "CON-98765",
+    "contractDate": "2024-01-10T10:00:00Z",
+    "claimDate": "2024-01-15T10:00:00Z",
+    "timestamp": "2026-06-05T09:59:50Z"
+  }
+}
+```
+- **Resultados:**
+  - Sistema altamente resiliente frente a datos  inválidos
   - Aislamiento efectivo de errores sin afectar el flujo principal
   - Mejora de la observabilidad del pipeline y trazabilidad de fallos
   - Posibilidad de análisis posterior para detección de problemas en la fuente de datos
 
-### 3.5 Blocker Service (Fraud Signal Engine)
+### 3.6 Blocker Service (Fraud Signal Engine)
 
-- Responsabilidad:
+- **Responsabilidad:**
   Procesamiento en streaming y detección de posible fraude.
 
-- Proceso:
+- **Proceso:**
   - Consume eventos de Kafka (topic: claims-reported)
   - Aplica reglas de negocio para la detección del posible fraude y genera la decisión final del evento basándose en ellas:
     - Un evento se marca como BLOCKED si el importe supera los 10.000 o si la reclamación se realiza en menos de 7 días desde la fecha del contrato
@@ -238,14 +261,14 @@ D -->|done| L
     - payment-decisions, incluyendo el evento entiquecido con la decision final (APPROVED o BLOCKED) y las razones asociadas.
     - fraud-events, cuando un evento es clasificado como posible fraude (BLOCKED) (detección y monitorización de posible fraude en tiempo real)
       
-- Reglas de negocio aplicadas:
+- **Reglas de negocio aplicadas:**
 
   | # | Regla                | Condición                             | Reason generado | Resultado |
   | - | -------------------- | ------------------------------------- | --------------- | --------- |
   | 1 | Importe elevado      | `amount > HIGH_RISK_AMOUNT`           | `high_amount`   | `BLOCKED` |
   | 2 | Reclamación temprana | `(claimDate - contractDate).days < 7` | `early_claim`   | `BLOCKED` |
 
-- Matriz de decisión:
+- **Matriz de decisión:**
 
   | Importe elevado | Reclamación temprana | Reasons                          | Decision   |
   | --------------- | -------------------- | -------------------------------- | ---------- |
@@ -255,7 +278,7 @@ D -->|done| L
   | Sí              | Sí                   | `["high_amount", "early_claim"]` | `BLOCKED`  |
 
   
-- Output:
+- **Output:**
    - Kafka topic: payment-decisions
    - Kafka topic: fraud-events (solo si BLOCKED)
 
@@ -268,7 +291,7 @@ D -->|done| L
    | Cardinalidad | 1:1 con eventos          | Subconjunto                     |
 
 
-- Flowchart diagram:
+- **Flowchart diagram:**
 
 ```mermaid
 flowchart LR
@@ -308,7 +331,7 @@ H --> I
 ```
 
 
-- Sequence diagram:
+- **Sequence diagram:**
 
 ```mermaid
 %%{init: {
@@ -352,18 +375,17 @@ S->>K: commit offset
 ```
 
 
-- Resultados:
-  - Detección del posible fraude near real-time
-  - Consistencia en el procesamiento gracias a idempotencia en Redis
-  - Evita duplicados
+- **Resultados:**
+  - Detecta posibles fraudes y genera decisiones de bloqueo o aprobación en tiempo casi real.
+  - Consistencia en el procesamiento gracias a idempotencia en Redis.
+  - Evita duplicados.
 
-### 3.6. Estado (Redis)
+### 3.7. Estado (Redis)
 
-- Responsabilidad: almacenamiento de estado incremental.
-  Evita duplicados (idempotencia)
-  Marca eventos procesados
+- **Responsabilidad:**
+  Almacenamiento de estado incremental, evita duplicados (idempotencia) y marca eventos procesados
 
-- Proceso:
+- **Proceso:**
   - Para cada eventId se crea la clave processed_claim_events:<eventId> usando SET NX, de forma que solo se guarda si no existe previamente.
   - Cada clave tiene un TTL de 86400 segundos (24 horas) para no saturar el sistema, tras el cual expira automáticamente.
   - Si la clave ya existe, el evento se considera duplicado y se ignora sin volver a procesarse.
@@ -376,22 +398,23 @@ S->>K: commit offset
   | TTL      | 24 horas                           |
   | Impacto  | idempotencia del pipeline          |
 
-- Output:
+- **Output:**
   Redis key: processed_claim_events:{eventId}
 
-- Resultados:
+- **Resultados:**
   - Idempotencia, parcial dado que:
      - mientras el evento exista en REDIS (24h)
      - se basa sólo en la existencia del event_id, no en el contenido.
   - Evita reprocessing
   - Consistencia del pipeline
 
-### 3.7. Writing Service
+### 3.8. Writing Service
 
-- Responsabilidad: persistencia de eventos
+- **Responsabilidad:**
+  Persistencia de eventos
 
-- Proceso
-
+- **Proceso**
+  
   -  Consume los eventos del (topic: claims-valid)
   -  Realiza una inserción directa en la base de datos en PostgreSQL y garantiza la persistencia del evento forma resiliente.
   -  Controla manualmente el commit de offsets para garantizar consistencia entre streaming y base de datos:
@@ -420,15 +443,14 @@ F -- Yes --> H --> I
 
 F -- No --> G --> J --> B
 ```
- - Output:
+
+- **Output:**
   PostgreSQL table: claims
 
-- Resultados:
-  Persistencia confiable de eventos procesados
-  Desacoplar completamente el procesamiento en streaming del almacenamiento persistente
-  Construcción de histórico estructurado de eventos para su posterior consulta en auditoría, análisis o reporting.
-
-
+- **Resultados:**
+  - Persistencia confiable de eventos procesados
+  - Desacopla el procesamiento en streaming del almacenamiento persistente
+  - Construcción de histórico estructurado de eventos para su posterior consulta en auditoría, análisis o reporting.
 
 
 ## 4. Tecnologías utilizadas
@@ -443,17 +465,12 @@ F -- No --> G --> J --> B
 | **Docker & Docker Compose** | Orquestación              | Entorno de ejecución completo              | Facilita despliegue local reproducible de toda la arquitectura distribuida                                                                 |
 | **JSON**                    | Formato de eventos        | Contrato de datos entre servicios          | Permite intercambio flexible de eventos entre servicios sin esquema rígido                                                                 |
 
-La tecnología utilizada permite:
-
-  ✔ Kafka → sistema de event-driven architecture
-  ✔ Redis → control de consistencia (idempotencia)
-  ✔ PostgreSQL → sistema de persistencia final (source of truth parcial)
-  ✔ Python + kafka-python → capa de procesamiento ligera
-  ✔ Docker → infraestructura reproducible tipo producción
 
 ## 5. Patrones del sistema
 
-| Patrón                                        | Dónde se aplica   | Cómo se implementa en el proyecto                                                 | Qué aporta                                                          |
+La arquitectura utilizada es event-driven con separación explícita entre capa de calidad de datos, capa de persistencia y capa de lógica de negocio, donde Kafka actúa como backbone del sistema:
+
+| Patrón                                        | Dónde se aplica   | Cómo se implementa en el proyecto                                                 | Aporte al sistema                                                            |
 | --------------------------------------------- | ----------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
 | **Event-Driven Architecture**                 | Todo el sistema   | Comunicación asíncrona mediante Kafka entre Producer, Validator, Blocker y Writer | Desacopla servicios y permite procesamiento distribuido y escalable |
 | **Pipeline de datos (Data Pipeline)**         | End-to-end flow   | Flujo secuencial: `claims-reported → claims-valid → processing paralelo`          | Permite tratamiento progresivo de calidad de datos                  |
@@ -464,15 +481,7 @@ La tecnología utilizada permite:
 | **Schema-less contract (JSON)**               | Todo el sistema   | Eventos en JSON sin esquema formal rígido                                         | Flexibilidad en evolución del modelo de eventos                     |
 | **Pub/Sub (Kafka)**                           | Topics Kafka      | Múltiples consumidores sobre `claims-valid` y otros topics                        | Escalabilidad horizontal y consumo independiente por servicio       |
 
-La arquitectura utilizada es event-driven con separación explícita entre capa de calidad de datos, capa de persistencia y capa de lógica de negocio, donde Kafka actúa como backbone del sistema, permite:
-
-   ✔ desacoplamiento real entre servicios
-   ✔ pipeline de datos claro (no spaghetti streaming)
-   ✔ tolerancia a fallos con DLQ
-   ✔ idempotencia en decisiones críticas
-   ✔ fan-out de eventos de negocio
-   ✔ escalabilidad por consumer groups
-
+  
 ## 12. Observaciones / Limitaciones conocidas / Mejoras
 
 ### Particionado Kafka
@@ -547,13 +556,12 @@ La solución propuesta
 
 - En cuanto a la gestión de estado, el sistema combina Redis para idempotencia, Kafka como log distribuido persistente y PostgreSQL como capa final de almacenamiento, resultando en un modelo de estado distribuido entre componentes.
 
-En conjunto, la arquitectura implementada refleja un diseño modular, escalable, cumpliendo los objetivos funcionales de procesamiento asíncrono, extensibilidad y escalabilidad definidos en la práctica.
+En conjunto, la arquitectura implementada procura reflejar un diseño modular, escalable, cumpliendo los objetivos funcionales de procesamiento asíncrono, extensibilidad y escalabilidad definidos en la práctica.
 
 ### 13.2. Conclusión operativa:
 
-Aunque el sistema no es aún “enterprise real” en cuanto a observabilidad, gobernanza de esquemas o consistencia end-to-end, permite implementar de forma realista un caso de uso de procesamiento de claims y detección de posible fraude en near real-time. 
+Aunque el sistema no es aún “enterprise real” en cuanto a observabilidad, gobernanza de esquemas o consistencia end-to-end, pretende implementar de forma realista un caso de uso de procesamiento de claims y detección de posible fraude en near real-time. 
 
-La arquitectura basada en eventos, junto con el desacoplamiento de servicios, escalabilidad y persistencia, lo hace extensible y cercano a patrones utilizados en sistemas distribuidos de producción.
 
 ## 14. LOGS
 
