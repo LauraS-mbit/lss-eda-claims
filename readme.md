@@ -11,7 +11,7 @@ En concreto, el sistema desarrollado:
 - Procesa eventos de forma asíncrona mediante una arquitectura orientada a eventos.
 - Gestiona errores mediante una Dead Letter Queue (DLQ).
 - Detecta posibles fraudes y genera decisiones de bloqueo o aprobación en tiempo casi real.
-- Mantiene estado derivado y persistencia a partir de los eventos procesados.
+- Utiliza Redis para garantizar idempotencia y evitar el reprocesamiento de eventos duplicados.
 - Permite escalar horizontalmente mediante consumidores independientes.
 - Garantiza la persistencia y trazabilidad de los datos.
 
