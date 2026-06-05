@@ -565,7 +565,7 @@ Aunque el sistema no es aún “enterprise real” en cuanto a observabilidad, g
 
 ## 14. LOGS
 
-###. Claims-Producer
+### PRODUCER
 
 producer started broker=kafka:9092 topic=claims-reported
 
