@@ -47,15 +47,15 @@ F -. idempotency .-> K[(Redis)]
 ### 2.2. Descripción general
 
 - El **Producer** genera eventos de reclamaciones (ClaimCreated) de forma continua y los envía a Kafka.
-- Kafka recibe los eventos a un topic (claims-reported) y actúa como event bus central del sistema.
-- El **Validator Service** valida los eventos y los redirige según el resultado a los topics (claims-valid / DLQ (claims-dlq)
+- **Kafka** recibe los eventos a un topic (claims-reported) y actúa como event bus central del sistema.
+- El **Validator Service** valida los eventos y los redirige según el resultado a los topics (claims-valid / **DLQ** (claims-dlq)
 - El **Blocker Service** consume los eventos válidos:
-   - Redis se utiliza para garantizar idempotencia y evitar el reprocesamiento de eventos duplicados.
+   - **Redis** se utiliza para garantizar idempotencia y evitar el reprocesamiento de eventos duplicados.
    - El sistema genera una decisión final según reglas simuladas de posible fraude (APPROVED o BLOCKED).
    - Los resultados se publican en:
      - payment-decisions (todos los eventos procesados)
      - fraud-events (sólo eventos bloqueados)
-- El **Writing Service** consume todos los eventos del topic (claims-reported) y los persiste en PostgreSQL:
+- El **Writing Service** consume todos los eventos del topic (claims-reported) y los persiste en **PostgreSQL**:
    - Se construye un histórico completo de siniestros para auditoría o análisis posterior.
 
 ### 2.3. Linaje de datos
